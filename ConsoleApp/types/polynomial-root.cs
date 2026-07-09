@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Challenge.DataContracts;
 
@@ -6,60 +7,25 @@ namespace ConsoleApp.types;
 
 public static class PolynomialRoot
 {
+    private const double Eps = 0.000001;
+
     public static string Solve(TaskResponse taskResponse)
     {
-        var coefficients = ParsePolynomial(taskResponse.Question);
+        double[] coefficients = ParsePolynomial(taskResponse.Question);
 
-        double a = coefficients.a;
-        double b = coefficients.b;
-        double c = coefficients.c;
+        double? root = FindRoot(coefficients);
 
-        if (Math.Abs(a) < 0.0000001)
-        {
-            if (Math.Abs(b) < 0.0000001)
-            {
-                if (Math.Abs(c) < 0.0000001)
-                {
-                    return "0";
-                }
-
-                return "no roots";
-            }
-
-            double root = -c / b;
-            return FormatAnswer(root);
-        }
-
-        double discriminant = b * b - 4 * a * c;
-
-        if (discriminant < -0.0000001)
+        if (root == null)
         {
             return "no roots";
         }
 
-        if (Math.Abs(discriminant) < 0.0000001)
-        {
-            discriminant = 0;
-        }
-
-        double sqrtD = Math.Sqrt(discriminant);
-
-        double root1 = (-b + sqrtD) / (2 * a);
-        double root2 = (-b - sqrtD) / (2 * a);
-
-        if (root1 >= 0)
-        {
-            return FormatAnswer(root1);
-        }
-
-        return FormatAnswer(root2);
+        return FormatAnswer(root.Value);
     }
 
-    private static (double a, double b, double c) ParsePolynomial(string question)
+    private static double[] ParsePolynomial(string question)
     {
-        double a = 0;
-        double b = 0;
-        double c = 0;
+        Dictionary<int, double> coefficients = new Dictionary<int, double>();
 
         string[] parts = question.Split('+');
 
@@ -67,28 +33,65 @@ public static class PolynomialRoot
         {
             string part = rawPart.Trim();
 
-            if (part.Contains("x^2"))
+            if (string.IsNullOrEmpty(part))
             {
-                a = GetCoefficient(part, "*x^2");
+                continue;
             }
-            else if (part.Contains("x"))
+
+            int power;
+            double coefficient;
+
+            if (part.Contains("x"))
             {
-                b = GetCoefficient(part, "*x");
+                int xIndex = part.IndexOf("*x", StringComparison.Ordinal);
+                string coefficientText = part.Substring(0, xIndex).Trim();
+
+                coefficient = ParseNumber(coefficientText);
+
+                if (part.Contains("^"))
+                {
+                    int powerIndex = part.IndexOf("^", StringComparison.Ordinal);
+                    string powerText = part.Substring(powerIndex + 1).Trim();
+
+                    power = int.Parse(powerText);
+                }
+                else
+                {
+                    power = 1;
+                }
             }
             else
             {
-                c = ParseNumber(part);
+                coefficient = ParseNumber(part);
+                power = 0;
+            }
+
+            if (!coefficients.ContainsKey(power))
+            {
+                coefficients[power] = 0;
+            }
+
+            coefficients[power] += coefficient;
+        }
+
+        int maxPower = 0;
+
+        foreach (int power in coefficients.Keys)
+        {
+            if (power > maxPower)
+            {
+                maxPower = power;
             }
         }
 
-        return (a, b, c);
-    }
+        double[] result = new double[maxPower + 1];
 
-    private static double GetCoefficient(string part, string variablePart)
-    {
-        string coefficient = part.Replace(variablePart, "").Trim();
+        foreach (var pair in coefficients)
+        {
+            result[pair.Key] = pair.Value;
+        }
 
-        return ParseNumber(coefficient);
+        return result;
     }
 
     private static double ParseNumber(string value)
@@ -103,13 +106,209 @@ public static class PolynomialRoot
         return double.Parse(value, CultureInfo.InvariantCulture);
     }
 
+    private static double? FindRoot(double[] coefficients)
+    {
+        int degree = GetDegree(coefficients);
+
+        if (degree == -1)
+        {
+            return 0;
+        }
+
+        if (degree == 0)
+        {
+            return null;
+        }
+
+        if (degree == 1)
+        {
+            return -coefficients[0] / coefficients[1];
+        }
+
+        double bound = GetBound(coefficients);
+
+        double left = -bound;
+        double leftValue = Calculate(coefficients, left);
+
+        if (Math.Abs(leftValue) <= 0.001)
+        {
+            return left;
+        }
+
+        int steps = 50000;
+
+        for (int i = 1; i <= steps; i++)
+        {
+            double right = -bound + 2 * bound * i / steps;
+            double rightValue = Calculate(coefficients, right);
+
+            if (Math.Abs(rightValue) <= 0.001)
+            {
+                return right;
+            }
+
+            if (leftValue * rightValue < 0)
+            {
+                return Bisection(coefficients, left, right);
+            }
+
+            left = right;
+            leftValue = rightValue;
+        }
+
+        return TryNewton(coefficients, bound);
+    }
+
+    private static int GetDegree(double[] coefficients)
+    {
+        for (int i = coefficients.Length - 1; i >= 0; i--)
+        {
+            if (Math.Abs(coefficients[i]) > Eps)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static double GetBound(double[] coefficients)
+    {
+        int degree = GetDegree(coefficients);
+
+        if (degree <= 0)
+        {
+            return 10;
+        }
+
+        double leading = Math.Abs(coefficients[degree]);
+        double max = 0;
+
+        for (int i = 0; i < degree; i++)
+        {
+            double current = Math.Abs(coefficients[i] / leading);
+
+            if (current > max)
+            {
+                max = current;
+            }
+        }
+
+        double bound = 1 + max;
+
+        if (bound < 10)
+        {
+            bound = 10;
+        }
+
+        return bound;
+    }
+
+    private static double Bisection(double[] coefficients, double left, double right)
+    {
+        double leftValue = Calculate(coefficients, left);
+
+        for (int i = 0; i < 100; i++)
+        {
+            double middle = (left + right) / 2;
+            double middleValue = Calculate(coefficients, middle);
+
+            if (Math.Abs(middleValue) <= 0.001)
+            {
+                return middle;
+            }
+
+            if (leftValue * middleValue <= 0)
+            {
+                right = middle;
+            }
+            else
+            {
+                left = middle;
+                leftValue = middleValue;
+            }
+        }
+
+        return (left + right) / 2;
+    }
+
+    private static double? TryNewton(double[] coefficients, double bound)
+    {
+        double[] derivative = GetDerivative(coefficients);
+
+        for (int startIndex = 0; startIndex <= 1000; startIndex++)
+        {
+            double x = -bound + 2 * bound * startIndex / 1000;
+
+            for (int iteration = 0; iteration < 50; iteration++)
+            {
+                double value = Calculate(coefficients, x);
+
+                if (Math.Abs(value) <= 0.001)
+                {
+                    return x;
+                }
+
+                double derivativeValue = Calculate(derivative, x);
+
+                if (Math.Abs(derivativeValue) < Eps)
+                {
+                    break;
+                }
+
+                x -= value / derivativeValue;
+
+                if (double.IsNaN(x) || double.IsInfinity(x))
+                {
+                    break;
+                }
+
+                if (x < -bound * 2 || x > bound * 2)
+                {
+                    break;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static double[] GetDerivative(double[] coefficients)
+    {
+        if (coefficients.Length == 1)
+        {
+            return new double[] { 0 };
+        }
+
+        double[] derivative = new double[coefficients.Length - 1];
+
+        for (int i = 1; i < coefficients.Length; i++)
+        {
+            derivative[i - 1] = coefficients[i] * i;
+        }
+
+        return derivative;
+    }
+
+    private static double Calculate(double[] coefficients, double x)
+    {
+        double result = 0;
+
+        for (int i = coefficients.Length - 1; i >= 0; i--)
+        {
+            result = result * x + coefficients[i];
+        }
+
+        return result;
+    }
+
     private static string FormatAnswer(double number)
     {
-        if (Math.Abs(number) < 0.0000001)
+        if (Math.Abs(number) < Eps)
         {
             number = 0;
         }
 
-        return number.ToString("G17", CultureInfo.InvariantCulture);
+        return number.ToString("0.######", CultureInfo.InvariantCulture);
     }
 }
