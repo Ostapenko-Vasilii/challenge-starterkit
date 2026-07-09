@@ -7,20 +7,47 @@ namespace ConsoleApp.types;
 
 public static class PolynomialRoot
 {
-    private const double Eps = 0.000001;
+    private const double Eps = 0.0000001;
 
     public static string Solve(TaskResponse taskResponse)
     {
         double[] coefficients = ParsePolynomial(taskResponse.Question);
+        int degree = GetDegree(coefficients);
 
-        double? root = FindRoot(coefficients);
+        if (degree == -1)
+        {
+            return "0";
+        }
 
-        if (root == null)
+        if (degree == 0)
         {
             return "no roots";
         }
 
-        return FormatAnswer(root.Value);
+        if (degree == 1)
+        {
+            double root = -coefficients[0] / coefficients[1];
+            return FormatAnswer(root);
+        }
+
+        if (degree == 2)
+        {
+            return SolveQuadratic(coefficients);
+        }
+
+        double? foundRoot = FindRootByScan(coefficients);
+
+        if (foundRoot == null)
+        {
+            foundRoot = FindRootByNewton(coefficients);
+        }
+
+        if (foundRoot == null)
+        {
+            return "no roots";
+        }
+
+        return FormatAnswer(foundRoot.Value);
     }
 
     private static double[] ParsePolynomial(string question)
@@ -44,15 +71,21 @@ public static class PolynomialRoot
             if (part.Contains("x"))
             {
                 int xIndex = part.IndexOf("*x", StringComparison.Ordinal);
-                string coefficientText = part.Substring(0, xIndex).Trim();
 
-                coefficient = ParseNumber(coefficientText);
+                if (xIndex == -1)
+                {
+                    coefficient = 1;
+                }
+                else
+                {
+                    string coefficientText = part.Substring(0, xIndex).Trim();
+                    coefficient = ParseNumber(coefficientText);
+                }
 
                 if (part.Contains("^"))
                 {
                     int powerIndex = part.IndexOf("^", StringComparison.Ordinal);
                     string powerText = part.Substring(powerIndex + 1).Trim();
-
                     power = int.Parse(powerText);
                 }
                 else
@@ -106,25 +139,39 @@ public static class PolynomialRoot
         return double.Parse(value, CultureInfo.InvariantCulture);
     }
 
-    private static double? FindRoot(double[] coefficients)
+    private static string SolveQuadratic(double[] coefficients)
     {
-        int degree = GetDegree(coefficients);
+        double c = coefficients[0];
+        double b = coefficients[1];
+        double a = coefficients[2];
 
-        if (degree == -1)
+        double discriminant = b * b - 4 * a * c;
+
+        if (discriminant < -Eps)
         {
-            return 0;
+            return "no roots";
         }
 
-        if (degree == 0)
+        if (Math.Abs(discriminant) < Eps)
         {
-            return null;
+            discriminant = 0;
         }
 
-        if (degree == 1)
+        double sqrtD = Math.Sqrt(discriminant);
+
+        double root1 = (-b + sqrtD) / (2 * a);
+        double root2 = (-b - sqrtD) / (2 * a);
+
+        if (root1 >= 0)
         {
-            return -coefficients[0] / coefficients[1];
+            return FormatAnswer(root1);
         }
 
+        return FormatAnswer(root2);
+    }
+
+    private static double? FindRootByScan(double[] coefficients)
+    {
         double bound = GetBound(coefficients);
 
         double left = -bound;
@@ -135,7 +182,7 @@ public static class PolynomialRoot
             return left;
         }
 
-        int steps = 50000;
+        int steps = 100000;
 
         for (int i = 1; i <= steps; i++)
         {
@@ -156,52 +203,7 @@ public static class PolynomialRoot
             leftValue = rightValue;
         }
 
-        return TryNewton(coefficients, bound);
-    }
-
-    private static int GetDegree(double[] coefficients)
-    {
-        for (int i = coefficients.Length - 1; i >= 0; i--)
-        {
-            if (Math.Abs(coefficients[i]) > Eps)
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    private static double GetBound(double[] coefficients)
-    {
-        int degree = GetDegree(coefficients);
-
-        if (degree <= 0)
-        {
-            return 10;
-        }
-
-        double leading = Math.Abs(coefficients[degree]);
-        double max = 0;
-
-        for (int i = 0; i < degree; i++)
-        {
-            double current = Math.Abs(coefficients[i] / leading);
-
-            if (current > max)
-            {
-                max = current;
-            }
-        }
-
-        double bound = 1 + max;
-
-        if (bound < 10)
-        {
-            bound = 10;
-        }
-
-        return bound;
+        return null;
     }
 
     private static double Bisection(double[] coefficients, double left, double right)
@@ -213,7 +215,7 @@ public static class PolynomialRoot
             double middle = (left + right) / 2;
             double middleValue = Calculate(coefficients, middle);
 
-            if (Math.Abs(middleValue) <= 0.001)
+            if (Math.Abs(middleValue) <= 0.0001)
             {
                 return middle;
             }
@@ -232,15 +234,16 @@ public static class PolynomialRoot
         return (left + right) / 2;
     }
 
-    private static double? TryNewton(double[] coefficients, double bound)
+    private static double? FindRootByNewton(double[] coefficients)
     {
+        double bound = GetBound(coefficients);
         double[] derivative = GetDerivative(coefficients);
 
-        for (int startIndex = 0; startIndex <= 1000; startIndex++)
+        for (int startIndex = 0; startIndex <= 2000; startIndex++)
         {
-            double x = -bound + 2 * bound * startIndex / 1000;
+            double x = -bound + 2 * bound * startIndex / 2000;
 
-            for (int iteration = 0; iteration < 50; iteration++)
+            for (int iteration = 0; iteration < 100; iteration++)
             {
                 double value = Calculate(coefficients, x);
 
@@ -288,6 +291,51 @@ public static class PolynomialRoot
         }
 
         return derivative;
+    }
+
+    private static int GetDegree(double[] coefficients)
+    {
+        for (int i = coefficients.Length - 1; i >= 0; i--)
+        {
+            if (Math.Abs(coefficients[i]) > Eps)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static double GetBound(double[] coefficients)
+    {
+        int degree = GetDegree(coefficients);
+
+        if (degree <= 0)
+        {
+            return 10;
+        }
+
+        double leading = Math.Abs(coefficients[degree]);
+        double max = 0;
+
+        for (int i = 0; i < degree; i++)
+        {
+            double current = Math.Abs(coefficients[i] / leading);
+
+            if (current > max)
+            {
+                max = current;
+            }
+        }
+
+        double bound = 1 + max;
+
+        if (bound < 10)
+        {
+            bound = 10;
+        }
+
+        return bound;
     }
 
     private static double Calculate(double[] coefficients, double x)
