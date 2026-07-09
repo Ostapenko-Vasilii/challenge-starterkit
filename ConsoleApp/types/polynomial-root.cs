@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Challenge.DataContracts;
 
@@ -6,38 +7,152 @@ namespace ConsoleApp.types;
 
 public static class PolynomialRoot
 {
+    private const double Eps = 0.0000001;
+
     public static string Solve(TaskResponse taskResponse)
     {
-        var coefficients = ParsePolynomial(taskResponse.Question);
+        double[] coefficients = ParsePolynomial(taskResponse.Question);
+        int degree = GetDegree(coefficients);
 
-        double a = coefficients.a;
-        double b = coefficients.b;
-        double c = coefficients.c;
-
-        if (Math.Abs(a) < 0.0000001)
+        if (degree == -1)
         {
-            if (Math.Abs(b) < 0.0000001)
-            {
-                if (Math.Abs(c) < 0.0000001)
-                {
-                    return "0";
-                }
-
-                return "no roots";
-            }
-
-            double root = -c / b;
-            return FormatAnswer(root);
+            return "0";
         }
 
-        double discriminant = b * b - 4 * a * c;
-
-        if (discriminant < -0.0000001)
+        if (degree == 0)
         {
             return "no roots";
         }
 
-        if (Math.Abs(discriminant) < 0.0000001)
+        if (degree == 1)
+        {
+            double root = -coefficients[0] / coefficients[1];
+            return FormatAnswer(root);
+        }
+
+        if (degree == 2)
+        {
+            return SolveQuadratic(coefficients);
+        }
+
+        double? foundRoot = FindRootByScan(coefficients);
+
+        if (foundRoot == null)
+        {
+            foundRoot = FindRootByNewton(coefficients);
+        }
+
+        if (foundRoot == null)
+        {
+            return "no roots";
+        }
+
+        return FormatAnswer(foundRoot.Value);
+    }
+
+    private static double[] ParsePolynomial(string question)
+    {
+        Dictionary<int, double> coefficients = new Dictionary<int, double>();
+
+        string[] parts = question.Split('+');
+
+        foreach (string rawPart in parts)
+        {
+            string part = rawPart.Trim();
+
+            if (string.IsNullOrEmpty(part))
+            {
+                continue;
+            }
+
+            int power;
+            double coefficient;
+
+            if (part.Contains("x"))
+            {
+                int xIndex = part.IndexOf("*x", StringComparison.Ordinal);
+
+                if (xIndex == -1)
+                {
+                    coefficient = 1;
+                }
+                else
+                {
+                    string coefficientText = part.Substring(0, xIndex).Trim();
+                    coefficient = ParseNumber(coefficientText);
+                }
+
+                if (part.Contains("^"))
+                {
+                    int powerIndex = part.IndexOf("^", StringComparison.Ordinal);
+                    string powerText = part.Substring(powerIndex + 1).Trim();
+                    power = int.Parse(powerText);
+                }
+                else
+                {
+                    power = 1;
+                }
+            }
+            else
+            {
+                coefficient = ParseNumber(part);
+                power = 0;
+            }
+
+            if (!coefficients.ContainsKey(power))
+            {
+                coefficients[power] = 0;
+            }
+
+            coefficients[power] += coefficient;
+        }
+
+        int maxPower = 0;
+
+        foreach (int power in coefficients.Keys)
+        {
+            if (power > maxPower)
+            {
+                maxPower = power;
+            }
+        }
+
+        double[] result = new double[maxPower + 1];
+
+        foreach (var pair in coefficients)
+        {
+            result[pair.Key] = pair.Value;
+        }
+
+        return result;
+    }
+
+    private static double ParseNumber(string value)
+    {
+        value = value.Trim();
+
+        if (value.StartsWith("(") && value.EndsWith(")"))
+        {
+            value = value.Substring(1, value.Length - 2);
+        }
+
+        return double.Parse(value, CultureInfo.InvariantCulture);
+    }
+
+    private static string SolveQuadratic(double[] coefficients)
+    {
+        double c = coefficients[0];
+        double b = coefficients[1];
+        double a = coefficients[2];
+
+        double discriminant = b * b - 4 * a * c;
+
+        if (discriminant < -Eps)
+        {
+            return "no roots";
+        }
+
+        if (Math.Abs(discriminant) < Eps)
         {
             discriminant = 0;
         }
@@ -55,61 +170,193 @@ public static class PolynomialRoot
         return FormatAnswer(root2);
     }
 
-    private static (double a, double b, double c) ParsePolynomial(string question)
+    private static double? FindRootByScan(double[] coefficients)
     {
-        double a = 0;
-        double b = 0;
-        double c = 0;
+        double bound = GetBound(coefficients);
 
-        string[] parts = question.Split('+');
+        double left = -bound;
+        double leftValue = Calculate(coefficients, left);
 
-        foreach (string rawPart in parts)
+        if (Math.Abs(leftValue) <= 0.001)
         {
-            string part = rawPart.Trim();
+            return left;
+        }
 
-            if (part.Contains("x^2"))
+        int steps = 100000;
+
+        for (int i = 1; i <= steps; i++)
+        {
+            double right = -bound + 2 * bound * i / steps;
+            double rightValue = Calculate(coefficients, right);
+
+            if (Math.Abs(rightValue) <= 0.001)
             {
-                a = GetCoefficient(part, "*x^2");
+                return right;
             }
-            else if (part.Contains("x"))
+
+            if (leftValue * rightValue < 0)
             {
-                b = GetCoefficient(part, "*x");
+                return Bisection(coefficients, left, right);
+            }
+
+            left = right;
+            leftValue = rightValue;
+        }
+
+        return null;
+    }
+
+    private static double Bisection(double[] coefficients, double left, double right)
+    {
+        double leftValue = Calculate(coefficients, left);
+
+        for (int i = 0; i < 100; i++)
+        {
+            double middle = (left + right) / 2;
+            double middleValue = Calculate(coefficients, middle);
+
+            if (Math.Abs(middleValue) <= 0.0001)
+            {
+                return middle;
+            }
+
+            if (leftValue * middleValue <= 0)
+            {
+                right = middle;
             }
             else
             {
-                c = ParseNumber(part);
+                left = middle;
+                leftValue = middleValue;
             }
         }
 
-        return (a, b, c);
+        return (left + right) / 2;
     }
 
-    private static double GetCoefficient(string part, string variablePart)
+    private static double? FindRootByNewton(double[] coefficients)
     {
-        string coefficient = part.Replace(variablePart, "").Trim();
+        double bound = GetBound(coefficients);
+        double[] derivative = GetDerivative(coefficients);
 
-        return ParseNumber(coefficient);
-    }
-
-    private static double ParseNumber(string value)
-    {
-        value = value.Trim();
-
-        if (value.StartsWith("(") && value.EndsWith(")"))
+        for (int startIndex = 0; startIndex <= 2000; startIndex++)
         {
-            value = value.Substring(1, value.Length - 2);
+            double x = -bound + 2 * bound * startIndex / 2000;
+
+            for (int iteration = 0; iteration < 100; iteration++)
+            {
+                double value = Calculate(coefficients, x);
+
+                if (Math.Abs(value) <= 0.001)
+                {
+                    return x;
+                }
+
+                double derivativeValue = Calculate(derivative, x);
+
+                if (Math.Abs(derivativeValue) < Eps)
+                {
+                    break;
+                }
+
+                x -= value / derivativeValue;
+
+                if (double.IsNaN(x) || double.IsInfinity(x))
+                {
+                    break;
+                }
+
+                if (x < -bound * 2 || x > bound * 2)
+                {
+                    break;
+                }
+            }
         }
 
-        return double.Parse(value, CultureInfo.InvariantCulture);
+        return null;
+    }
+
+    private static double[] GetDerivative(double[] coefficients)
+    {
+        if (coefficients.Length == 1)
+        {
+            return new double[] { 0 };
+        }
+
+        double[] derivative = new double[coefficients.Length - 1];
+
+        for (int i = 1; i < coefficients.Length; i++)
+        {
+            derivative[i - 1] = coefficients[i] * i;
+        }
+
+        return derivative;
+    }
+
+    private static int GetDegree(double[] coefficients)
+    {
+        for (int i = coefficients.Length - 1; i >= 0; i--)
+        {
+            if (Math.Abs(coefficients[i]) > Eps)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static double GetBound(double[] coefficients)
+    {
+        int degree = GetDegree(coefficients);
+
+        if (degree <= 0)
+        {
+            return 10;
+        }
+
+        double leading = Math.Abs(coefficients[degree]);
+        double max = 0;
+
+        for (int i = 0; i < degree; i++)
+        {
+            double current = Math.Abs(coefficients[i] / leading);
+
+            if (current > max)
+            {
+                max = current;
+            }
+        }
+
+        double bound = 1 + max;
+
+        if (bound < 10)
+        {
+            bound = 10;
+        }
+
+        return bound;
+    }
+
+    private static double Calculate(double[] coefficients, double x)
+    {
+        double result = 0;
+
+        for (int i = coefficients.Length - 1; i >= 0; i--)
+        {
+            result = result * x + coefficients[i];
+        }
+
+        return result;
     }
 
     private static string FormatAnswer(double number)
     {
-        if (Math.Abs(number) < 0.0000001)
+        if (Math.Abs(number) < Eps)
         {
             number = 0;
         }
 
-        return number.ToString("G17", CultureInfo.InvariantCulture);
+        return number.ToString("0.######", CultureInfo.InvariantCulture);
     }
 }
