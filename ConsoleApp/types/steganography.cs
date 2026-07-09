@@ -6,7 +6,7 @@ using Challenge.DataContracts;
 
 namespace ConsoleApp.types;
 
-public static class c
+public static class Steganography
 {
     public static string Solve(TaskResponse taskResponse)
     {
