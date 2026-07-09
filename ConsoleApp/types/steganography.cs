@@ -26,59 +26,61 @@ public static class Steganography
     };
 
     public static string Solve(TaskResponse taskResponse)
+{
+    var text = taskResponse.Question;
+    if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+
+    var lines = text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(l => l.Trim())
+                    .Where(l => !string.IsNullOrEmpty(l))
+                    .ToArray();
+
+    if (lines.Length < 2) return string.Empty;
+
+    var firstLine = lines[0];
+
+    var elementMatches = Regex.Matches(firstLine, @"\[([A-Za-z]{1,2})\]");
+    if (elementMatches.Count > 0)
     {
-        var text = taskResponse.Question;
-        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-
-        var lines = text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(l => l.Trim())
-                        .Where(l => !string.IsNullOrEmpty(l))
-                        .ToArray();
-
-        if (lines.Length < 2) return string.Empty;
-
-        var firstLine = lines[0];
         var targetLine = lines[1];
-
-        var elementMatches = Regex.Matches(firstLine, @"\[([A-Za-z]{1,2})\]");
-
-        if (elementMatches.Count > 0)
+        var result = new StringBuilder();
+        foreach (Match match in elementMatches)
         {
-            var result = new StringBuilder();
-            foreach (Match match in elementMatches)
+            var symbol = match.Groups[1].Value;
+            if (ChemicalElements.TryGetValue(symbol, out int atomNumber))
             {
-                var symbol = match.Groups[1].Value;
-                if (ChemicalElements.TryGetValue(symbol, out int atomNumber))
+                int index = atomNumber - 1; 
+                if (index >= 0 && index < targetLine.Length)
                 {
-                    int index = atomNumber - 1; 
-                    if (index >= 0 && index < targetLine.Length)
-                    {
-                        result.Append(targetLine[index]);
-                    }
+                    result.Append(targetLine[index]);
                 }
             }
-            return result.ToString();
         }
+        return result.ToString();
+    }
 
-        firstLine = Regex.Replace(firstLine, @"[IVXLCDM]+", match => DecodeRoman(match.Value).ToString());
+    firstLine = Regex.Replace(firstLine, @"[IVXLCDM]+", match => DecodeRoman(match.Value).ToString());
 
-        if (firstLine.Split(' ').Length > 1)
+    if (firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length > 1)
+    {
+        var targetLine = lines[1];
+        var indexes = firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                               .Select(x => int.Parse(x) - 1)
+                               .ToArray();
+        var result = new StringBuilder();
+    
+        foreach (var i in indexes)
         {
-            var indexes = firstLine.Split(' ').Select(x => int.Parse(x) - 1).ToArray();
-            var result = new StringBuilder();
-        
-            foreach (var i in indexes)
-            {
-                if (i >= 0 && i < targetLine.Length)
-                    result.Append(targetLine[i]);
-            }
-            return result.ToString();
+            if (i >= 0 && i < targetLine.Length)
+                result.Append(targetLine[i]);
         }
-        else
+        return result.ToString();
+    }
+    else
+    {
+        if (int.TryParse(firstLine.Trim(), out int targetIndex))
         {
-            var roman = firstLine.Trim();
-            int index = DecodeRoman(roman) - 1;
-
+            int index = targetIndex - 1;
             var result = new StringBuilder();
             foreach (var line in lines.Skip(1))
             {
@@ -90,6 +92,9 @@ public static class Steganography
             return result.ToString();
         }
     }
+
+    return string.Empty;
+}
 
     private static int DecodeRoman(string roman)
     {
