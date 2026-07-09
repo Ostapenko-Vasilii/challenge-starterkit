@@ -19,14 +19,14 @@ public static class MathSolve
         string[] tokens = Regex.Split(task, @"([+\-*/%()])");
         
         var operatorsStack = new Stack<string>();
-        var operands = new Stack<int>();
+        var operands = new Stack<long>();
         bool isUnaryCanBeNext = true; 
 
         foreach (var token in tokens)
         {
             if (string.IsNullOrEmpty(token)) continue;
 
-            if (int.TryParse(token, out int number))
+            if (long.TryParse(token, out long number))
             {
                 operands.Push(number);
                 isUnaryCanBeNext = false;
@@ -79,10 +79,10 @@ public static class MathSolve
             expression = Regex.Replace(expression, pattern, match =>
             {
                 string func = match.Groups[1].Value;
-                int a = int.Parse(match.Groups[2].Value);
-                int b = int.Parse(match.Groups[3].Value);
+                long a = long.Parse(match.Groups[2].Value);
+                long b = long.Parse(match.Groups[3].Value);
 
-                int result = func switch
+                long result = func switch
                 {
                     "min"   => Math.Min(a, b),
                     "max"   => Math.Max(a, b),
@@ -110,14 +110,14 @@ public static class MathSolve
         };
     }
 
-    private static void ExecuteOperator(Stack<string> operators, Stack<int> operands)
+    private static void ExecuteOperator(Stack<string> operators, Stack<long> operands)
     {
         string op = operators.Pop();
         
-        int right = operands.Pop();
-        int left = operands.Pop();
+        long right = operands.Pop();
+        long left = operands.Pop();
 
-        int result = op switch
+        long result = op switch
         {
             "+" => left + right,
             "-" => left - right,
