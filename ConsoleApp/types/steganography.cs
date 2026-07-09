@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Challenge.DataContracts;
 
 namespace ConsoleApp.types;
@@ -12,7 +13,7 @@ public static class Steganography
     {
         var text = taskResponse.Question;
         var lines = text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-    
+        lines[0] = Regex.Replace(lines[0], @"[IVXLCDM]+", match => DecodeRoman(match.Value).ToString());
         if (lines.Length == 0) return string.Empty;
 
         if (lines.First().Split(' ').Length > 1)
