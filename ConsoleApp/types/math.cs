@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Challenge.DataContracts;
 
@@ -11,6 +12,8 @@ public static class MathSolve
     public static string Solve(TaskResponse taskResponse)
 {
     string task = taskResponse.Question.Replace(" ", "");
+
+    task = Regex.Replace(task, @"[IVXLCDM]+", match => DecodeRoman(match.Value).ToString());
     
     string[] tokens = Regex.Split(task, @"([+\-*/%()])");
     
@@ -94,5 +97,32 @@ public static class MathSolve
         };
 
         operands.Push(result);
+    }
+    
+    private static int DecodeRoman(string roman)
+    {
+        var romanMap = new Dictionary<char, int> {
+            {'I', 1}, {'V', 5}, {'X', 10}, {'L', 50}, {'C', 100}, {'D', 500}, {'M', 1000}
+        };
+    
+        int total = 0;
+        int prevValue = 0;
+    
+        foreach (var c in roman.Reverse())
+        {
+            if (!romanMap.TryGetValue(c, out int currentValue)) continue;
+        
+            if (currentValue < prevValue)
+            {
+                total -= currentValue;
+            }
+            else
+            {
+                total += currentValue;
+            }
+            prevValue = currentValue;
+        }
+    
+        return total;
     }
 }
