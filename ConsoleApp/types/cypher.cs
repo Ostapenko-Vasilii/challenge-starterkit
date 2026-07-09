@@ -42,6 +42,15 @@ namespace ConsoleApp
                     }
                 }
             }
+            if (type.StartsWith("Vigenere's code"))
+            {
+                string[] parts = type.Split('=');
+                if (parts.Length > 1)
+                {
+                    string key = parts[1];
+                    return DecryptVigenere(enqrCode, key);
+                }
+            }
 
             throw new Exception();
         }
@@ -98,6 +107,30 @@ namespace ConsoleApp
                 }
 
                 deq.Add(allText[charIndex]);
+            }
+
+            return new string(deq.ToArray());
+        }
+
+        private static string DecryptVigenere(string enqr, string key)
+        {
+            var allText = "abcdefghijklmnopqrstuvwxyz0123456789' ";
+            var len = allText.Length;
+            var deq = new List<char>();
+
+            for (int i = 0; i < enqr.Length; i++)
+            {
+                int textIdx = allText.IndexOf(enqr[i]);
+                int keyIdx = allText.IndexOf(key[i % key.Length]);
+
+                if (textIdx == -1 || keyIdx == -1) continue;
+
+                int deqInd = (textIdx - keyIdx) % len;
+                if (deqInd < 0)
+                {
+                    deqInd += len;
+                }
+                deq.Add(allText[deqInd]);
             }
 
             return new string(deq.ToArray());

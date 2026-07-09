@@ -31,7 +31,7 @@ if (string.IsNullOrEmpty(teamSecret))
     if (string.IsNullOrEmpty(teamSecret))
     {
         Console.WriteLine(
-            $"Ключ команды не может быть пустым. Попробуй еще раз, либо впиши его сам в файл {secretFilePath}");
+            $"Ключ команды не может быть пустым. Попробуй еще разз, либо впиши его сам в файл {secretFilePath}");
         Console.ReadLine();
         return;
     }
@@ -97,46 +97,10 @@ foreach (var taskTypeId in availableTaskTypes)
     Console.WriteLine($"--- {taskTypeId}");
 
 Console.WriteLine();
-Console.WriteLine("Выбери режим запроса задач:");
-Console.WriteLine("1 - Запрашивать задачи определенного типа");
-Console.WriteLine("2 - Запрашивать задачи случайных типов");
-Console.Write("Твой выбор (1 или 2): ");
+Console.WriteLine("Будут использоваться pending-задачи всех типов, а недостающие задачи API выберет случайно.");
 
-var typeModeInput = Console.ReadLine()?.Trim();
-var useRandomTaskTypes = typeModeInput == "2";
-
-string selectedTaskType = null;
-const string defaultTaskType = "starter";
-
-if (!useRandomTaskTypes)
-{
-    Console.Write("Введи тип задачи либо нажми Enter для дефолтного типа: ");
-    selectedTaskType = Console.ReadLine()?.Trim();
-
-    if (string.IsNullOrWhiteSpace(selectedTaskType))
-    {
-        selectedTaskType = defaultTaskType;
-        Console.WriteLine($"Тип не указан. По умолчанию: {selectedTaskType}");
-    }
-
-    if (!availableTaskTypes.Contains(selectedTaskType))
-    {
-        Console.WriteLine($"Тип задачи '{selectedTaskType}' недоступен в текущем раунде.");
-        Console.WriteLine("Доступные типы:");
-
-        foreach (var taskTypeId in availableTaskTypes)
-        {
-            Console.WriteLine($"--- {taskTypeId}");
-        }
-
-        Console.ReadLine();
-        return;
-    }
-}
-else
-{
-    Console.WriteLine("Будут использоваться pending-задачи всех типов, а недостающие задачи API выберет случайно.");
-}
+const bool useRandomTaskTypes = true;
+const string selectedTaskType = null;
 
 var random = new Random();
 var run = true;
@@ -156,9 +120,7 @@ while (run)
     Console.WriteLine();
 
     Console.WriteLine(
-        useRandomTaskTypes
-            ? $"Нажми y, чтобы получить или дозапросить {taskAmount} задач случайных типов в раунде {currentRound.Id}"
-            : $"Нажми y, чтобы получить или дозапросить {taskAmount} задач типа {selectedTaskType} в раунде {currentRound.Id}");
+        $"Нажми y, чтобы получить или дозапросить {taskAmount} задач случайных типов в раунде {currentRound.Id}");
 
     Console.WriteLine("Или Enter, чтобы перейти к следующему действию");
 
@@ -190,12 +152,9 @@ while (run)
     Console.WriteLine();
     Console.WriteLine("------------------------------------------------");
 
-    Console.Write(useRandomTaskTypes
-        ? "Хочешь запросить еще задач случайных типов? (y/n): "
-        : "Хочешь запросить еще задач этого типа? (y/n): ");
+    Console.Write("Хочешь запросить еще задач случайных типов? (y/n): ");
 
     var exitChoice = Console.ReadLine()?.Trim();
-
     if (!string.Equals(exitChoice, "y", StringComparison.OrdinalIgnoreCase))
         run = false;
 }
