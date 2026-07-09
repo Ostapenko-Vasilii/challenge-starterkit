@@ -10,65 +10,96 @@ namespace ConsoleApp.types;
 public static class MathSolve
 {
     public static string Solve(TaskResponse taskResponse)
-{
-    string task = taskResponse.Question.Replace(" ", "");
-
-    task = Regex.Replace(task, @"[IVXLCDM]+", match => DecodeRoman(match.Value).ToString());
-    
-    string[] tokens = Regex.Split(task, @"([+\-*/%()])");
-    
-    var operatorsStack = new Stack<string>();
-    var operands = new Stack<int>();
-    
-    bool isUnaryCanBeNext = true; 
-
-    foreach (var token in tokens)
     {
-        if (string.IsNullOrEmpty(token)) continue;
+        string task = taskResponse.Question.Replace(" ", "");
 
-        if (int.TryParse(token, out int number))
-        {
-            operands.Push(number);
-            isUnaryCanBeNext = false;
-        }
-        else if (token == "(")
-        {
-            operatorsStack.Push(token);
-            isUnaryCanBeNext = true;
-        }
-        else if (token == ")")
-        {
-            while (operatorsStack.Count > 0 && operatorsStack.Peek() != "(")
-            {
-                ExecuteOperator(operatorsStack, operands);
-            }
-            if (operatorsStack.Count > 0) operatorsStack.Pop();
-            isUnaryCanBeNext = false; 
-        }
-        else 
-        {
-            if (token == "-" && isUnaryCanBeNext)
-            {
-                operands.Push(0); 
-            }
+        task = Regex.Replace(task, @"[IVXLCDM]+", match => DecodeRoman(match.Value).ToString());
+        task = EvaluateFunctions(task);
+        
+        string[] tokens = Regex.Split(task, @"([+\-*/%()])");
+        
+        var operatorsStack = new Stack<string>();
+        var operands = new Stack<long>();
+        bool isUnaryCanBeNext = true; 
 
-            while (operatorsStack.Count > 0 && GetPriority(operatorsStack.Peek()) >= GetPriority(token))
+        foreach (var token in tokens)
+        {
+            if (string.IsNullOrEmpty(token)) continue;
+
+            if (long.TryParse(token, out long number))
             {
-                ExecuteOperator(operatorsStack, operands);
+                operands.Push(number);
+                isUnaryCanBeNext = false;
             }
-            
-            operatorsStack.Push(token);
-            isUnaryCanBeNext = true;
+            else if (token == "(")
+            {
+                operatorsStack.Push(token);
+                isUnaryCanBeNext = true;
+            }
+            else if (token == ")")
+            {
+                while (operatorsStack.Count > 0 && operatorsStack.Peek() != "(")
+                {
+                    ExecuteOperator(operatorsStack, operands);
+                }
+                if (operatorsStack.Count > 0) operatorsStack.Pop();
+                isUnaryCanBeNext = false; 
+            }
+            else 
+            {
+                if (token == "-" && isUnaryCanBeNext)
+                {
+                    operands.Push(0); 
+                }
+
+                while (operatorsStack.Count > 0 && GetPriority(operatorsStack.Peek()) >= GetPriority(token))
+                {
+                    ExecuteOperator(operatorsStack, operands);
+                }
+                
+                operatorsStack.Push(token);
+                isUnaryCanBeNext = true;
+            }
         }
+
+        while (operatorsStack.Count > 0)
+        {
+            ExecuteOperator(operatorsStack, operands);
+        }
+
+        return operands.Pop().ToString();
     }
 
-    while (operatorsStack.Count > 0)
+    private static string EvaluateFunctions(string expression)
     {
-        ExecuteOperator(operatorsStack, operands);
+        string pattern = @"(min|max|left|right|sum|mul)\((-?\d+)\)\((-?\d+)\)";
+        
+        while (Regex.IsMatch(expression, pattern))
+        {
+            expression = Regex.Replace(expression, pattern, match =>
+            {
+                string func = match.Groups[1].Value;
+                long a = long.Parse(match.Groups[2].Value);
+                long b = long.Parse(match.Groups[3].Value);
+
+                long result = func switch
+                {
+                    "min"   => Math.Min(a, b),
+                    "max"   => Math.Max(a, b),
+                    "left"  => a,
+                    "right" => b,
+                    "sum"   => a + b,
+                    "mul"   => a * b,
+                    _ => throw new NotSupportedException($"Функция {func} не поддерживается")
+                };
+                
+                return result.ToString();
+            });
+        }
+        
+        return expression;
     }
 
-    return operands.Pop().ToString();
-}
     private static int GetPriority(string op)
     {
         return op switch
@@ -79,14 +110,14 @@ public static class MathSolve
         };
     }
 
-    private static void ExecuteOperator(Stack<string> operators, Stack<int> operands)
+    private static void ExecuteOperator(Stack<string> operators, Stack<long> operands)
     {
         string op = operators.Pop();
         
-        int right = operands.Pop();
-        int left = operands.Pop();
+        long right = operands.Pop();
+        long left = operands.Pop();
 
-        int result = op switch
+        long result = op switch
         {
             "+" => left + right,
             "-" => left - right,
