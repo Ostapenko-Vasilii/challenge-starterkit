@@ -238,3 +238,7 @@ _Pvt_Extensions
 
 **/.idea
 **/node_modules
+
+# direnv
+.direnv
+
