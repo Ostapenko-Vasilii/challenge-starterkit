@@ -14,7 +14,23 @@ public static class PolynomialRoot
         double b = coefficients.b;
         double c = coefficients.c;
 
-        return "no roots";
+    if (Math.Abs(a) < 0.0000001)
+    {
+        if (Math.Abs(b) < 0.0000001)
+        {
+            if (Math.Abs(c) < 0.0000001)
+            {
+                return "0";
+            }
+
+            return "no roots";
+        }
+
+        double root = -c / b;
+        return FormatAnswer(root);
+    }
+
+    return "no roots";
     }
      private static (double a, double b, double c) ParsePolynomial(string question)
     {
@@ -61,5 +77,12 @@ public static class PolynomialRoot
         }
 
         return double.Parse(value, CultureInfo.InvariantCulture);
+    }
+    private static string FormatAnswer(double number)
+    {
+        if (Math.Abs(number) < 0.0000001)
+            number = 0;
+
+        return number.ToString("G17", CultureInfo.InvariantCulture);
     }
 }
