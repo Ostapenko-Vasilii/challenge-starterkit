@@ -14,25 +14,48 @@ public static class PolynomialRoot
         double b = coefficients.b;
         double c = coefficients.c;
 
-    if (Math.Abs(a) < 0.0000001)
-    {
-        if (Math.Abs(b) < 0.0000001)
+        if (Math.Abs(a) < 0.0000001)
         {
-            if (Math.Abs(c) < 0.0000001)
+            if (Math.Abs(b) < 0.0000001)
             {
-                return "0";
+                if (Math.Abs(c) < 0.0000001)
+                {
+                    return "0";
+                }
+
+                return "no roots";
             }
 
+            double root = -c / b;
+            return FormatAnswer(root);
+        }
+
+        double discriminant = b * b - 4 * a * c;
+
+        if (discriminant < -0.0000001)
+        {
             return "no roots";
         }
 
-        double root = -c / b;
-        return FormatAnswer(root);
+        if (Math.Abs(discriminant) < 0.0000001)
+        {
+            discriminant = 0;
+        }
+
+        double sqrtD = Math.Sqrt(discriminant);
+
+        double root1 = (-b + sqrtD) / (2 * a);
+        double root2 = (-b - sqrtD) / (2 * a);
+
+        if (root1 >= 0)
+        {
+            return FormatAnswer(root1);
+        }
+
+        return FormatAnswer(root2);
     }
 
-    return "no roots";
-    }
-     private static (double a, double b, double c) ParsePolynomial(string question)
+    private static (double a, double b, double c) ParsePolynomial(string question)
     {
         double a = 0;
         double b = 0;
@@ -60,6 +83,7 @@ public static class PolynomialRoot
 
         return (a, b, c);
     }
+
     private static double GetCoefficient(string part, string variablePart)
     {
         string coefficient = part.Replace(variablePart, "").Trim();
@@ -78,10 +102,13 @@ public static class PolynomialRoot
 
         return double.Parse(value, CultureInfo.InvariantCulture);
     }
+
     private static string FormatAnswer(double number)
     {
         if (Math.Abs(number) < 0.0000001)
+        {
             number = 0;
+        }
 
         return number.ToString("G17", CultureInfo.InvariantCulture);
     }
