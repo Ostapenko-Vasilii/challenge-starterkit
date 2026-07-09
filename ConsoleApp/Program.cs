@@ -155,16 +155,10 @@ while (run)
 
     Console.WriteLine();
 
-    if (useRandomTaskTypes)
-    {
-        Console.WriteLine(
-            $"Нажми y, чтобы получить или дозапросить {taskAmount} задач случайных типов в раунде {currentRound.Id}");
-    }
-    else
-    {
-        Console.WriteLine(
-            $"Нажми y, чтобы получить или дозапросить {taskAmount} задач типа {selectedTaskType} в раунде {currentRound.Id}");
-    }
+    Console.WriteLine(
+        useRandomTaskTypes
+            ? $"Нажми y, чтобы получить или дозапросить {taskAmount} задач случайных типов в раунде {currentRound.Id}"
+            : $"Нажми y, чтобы получить или дозапросить {taskAmount} задач типа {selectedTaskType} в раунде {currentRound.Id}");
 
     Console.WriteLine("Или Enter, чтобы перейти к следующему действию");
 
@@ -180,45 +174,17 @@ while (run)
 
         var isManualMode = Console.ReadLine()?.Trim() == "7";
 
-        List<TaskResponse> tasksToSolve;
-
-        if (useRandomTaskTypes)
-        {
-            tasksToSolve = await GetOrRequestRandomTasksAsync(
-                challengeClient,
-                currentRound.Id,
-                availableTaskTypes,
-                taskAmount,
-                random,
-                serverRetryDelayMs
-            );
-        }
-        else
-        {
-            tasksToSolve = await GetOrRequestTasksByTypeAsync(
-                challengeClient,
-                currentRound.Id,
-                selectedTaskType,
-                taskAmount,
-                serverRetryDelayMs
-            );
-        }
-
-        tasksToSolve = tasksToSolve.Take(taskAmount).ToList();
-
-        if (tasksToSolve.Count > 0)
-        {
-            await SolveTasksAsync(
-                challengeClient,
-                tasksToSolve,
-                isManualMode,
-                serverRetryDelayMs
-            );
-        }
-        else
-        {
-            Console.WriteLine("Нет задач для решения или не удалось их запросить.");
-        }
+        await ProcessTasksPipelineAsync(
+            challengeClient,
+            currentRound.Id,
+            useRandomTaskTypes,
+            selectedTaskType,
+            availableTaskTypes,
+            taskAmount,
+            isManualMode,
+            random,
+            serverRetryDelayMs
+        );
     }
 
     Console.WriteLine();
@@ -241,223 +207,264 @@ Console.ReadLine();
 return;
 
 
-static async Task<List<TaskResponse>> GetOrRequestRandomTasksAsync(
+static async Task ProcessTasksPipelineAsync(
     ChallengeClient challengeClient,
     string roundId,
+    bool useRandomTaskTypes,
+    string selectedTaskType,
     List<string> availableTaskTypes,
     int requiredAmount,
+    bool isManualMode,
     Random random,
     int retryDelayMs)
 {
     Console.WriteLine();
-    Console.WriteLine("Проверка существующих нерешенных заданий всех типов...");
 
-    var pendingTasks = new List<TaskResponse>();
+    var alreadyHandledTaskIds = new HashSet<string>();
 
-    foreach (var taskType in availableTaskTypes)
+    for (var i = 0; i < requiredAmount; i++)
     {
+        var currentTaskNumber = i + 1;
+
+        Console.WriteLine();
+        Console.WriteLine($"========== Задача {currentTaskNumber}/{requiredAmount} ==========");
+
+        TaskResponse task;
+
+        if (useRandomTaskTypes)
+        {
+            task = await TryGetPendingRandomTaskAsync(
+                challengeClient,
+                roundId,
+                availableTaskTypes,
+                alreadyHandledTaskIds,
+                random,
+                retryDelayMs
+            );
+        }
+        else
+        {
+            task = await TryGetPendingTaskByTypeAsync(
+                challengeClient,
+                roundId,
+                selectedTaskType,
+                alreadyHandledTaskIds,
+                retryDelayMs
+            );
+        }
+
+        if (task == null)
+        {
+            Console.WriteLine(useRandomTaskTypes
+                ? "Подходящих pending-задач не найдено. Запрашиваем одну новую случайную задачу..."
+                : $"Подходящих pending-задач типа '{selectedTaskType}' не найдено. Запрашиваем одну новую задачу...");
+
+            task = await TryAskNewTaskAsync(
+                challengeClient,
+                roundId,
+                useRandomTaskTypes ? null : selectedTaskType,
+                retryDelayMs
+            );
+        }
+
+        if (task == null)
+        {
+            Console.WriteLine($"Не удалось получить задачу {currentTaskNumber}/{requiredAmount}. Переходим дальше.");
+            continue;
+        }
+
+        alreadyHandledTaskIds.Add(task.Id);
+
+        await SolveAndSubmitTaskAsync(
+            challengeClient,
+            task,
+            currentTaskNumber,
+            requiredAmount,
+            isManualMode,
+            retryDelayMs
+        );
+    }
+}
+
+
+static async Task<TaskResponse> TryGetPendingRandomTaskAsync(
+    ChallengeClient challengeClient,
+    string roundId,
+    List<string> availableTaskTypes,
+    HashSet<string> alreadyHandledTaskIds,
+    Random random,
+    int retryDelayMs)
+{
+    var shuffledTaskTypes = availableTaskTypes
+        .OrderBy(_ => random.Next())
+        .ToList();
+
+    foreach (var taskType in shuffledTaskTypes)
+    {
+        var task = await TryGetPendingTaskByTypeAsync(
+            challengeClient,
+            roundId,
+            taskType,
+            alreadyHandledTaskIds,
+            retryDelayMs
+        );
+        if (task == null) continue;
+
+        Console.WriteLine($"Взята pending-задача случайного режима из типа '{taskType}': {task.Id}");
+        return task;
+    }
+
+    return null;
+}
+
+
+static async Task<TaskResponse> TryGetPendingTaskByTypeAsync(
+    ChallengeClient challengeClient,
+    string roundId,
+    string taskType,
+    HashSet<string> alreadyHandledTaskIds,
+    int retryDelayMs)
+{
+    const int maxPendingLookupOffset = 20;
+
+    for (var offset = 0; offset < maxPendingLookupOffset; offset++)
+    {
+        List<TaskResponse> tasks;
+
         try
         {
-            var tasksOfType = await WithServerRetryAsync(
+            tasks = await WithServerRetryAsync(
                 () => challengeClient.GetTasksAsync(
                     roundId,
                     taskType,
                     TaskStatus.Pending,
-                    0,
-                    requiredAmount
+                    offset,
+                    1
                 ),
-                $"получение pending-задач типа '{taskType}'",
+                $"получение одной pending-задачи типа '{taskType}', offset={offset}",
                 retryDelayMs
             );
-
-            Console.WriteLine($"Тип '{taskType}': найдено pending-задач: {tasksOfType.Count}");
-
-            pendingTasks.AddRange(tasksOfType);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ошибка при получении pending-задач типа '{taskType}' после retry: {ex.Message}");
+            Console.WriteLine($"Не удалось получить pending-задачу типа '{taskType}' после retry: {ex.Message}");
+            return null;
         }
+
+        if (tasks.Count == 0)
+            return null;
+
+        var task = tasks[0];
+
+        if (alreadyHandledTaskIds.Contains(task.Id))
+            continue;
+
+        Console.WriteLine($"Найдена pending-задача типа '{taskType}': {task.Id}");
+        return task;
     }
 
-    pendingTasks = pendingTasks
-        .GroupBy(task => task.Id)
-        .Select(group => group.First())
-        .OrderBy(_ => random.Next())
-        .ToList();
-
-    Console.WriteLine($"Всего найдено pending-задач всех типов: {pendingTasks.Count}");
-
-    var tasksToRequest = requiredAmount - pendingTasks.Count;
-    if (tasksToRequest <= 0) return pendingTasks;
-
-    Console.WriteLine($"Pending-задач не хватает. Запрашиваем еще {tasksToRequest} новых случайных задач...");
-
-    for (var i = 0; i < tasksToRequest; i++)
-    {
-        try
-        {
-            var currentTaskNumber = i + 1;
-
-            var task = await WithServerRetryAsync(
-                () => challengeClient.AskNewTaskAsync(roundId),
-                $"запрос новой случайной задачи {currentTaskNumber}/{tasksToRequest}",
-                retryDelayMs
-            );
-
-            pendingTasks.Add(task);
-
-            Console.WriteLine($"Получена новая случайная задача {currentTaskNumber}/{tasksToRequest}: {task.Id}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Не удалось запросить случайную задачу {i + 1}/{tasksToRequest} после retry: {ex.Message}");
-        }
-    }
-
-    pendingTasks = pendingTasks
-        .GroupBy(task => task.Id)
-        .Select(group => group.First())
-        .OrderBy(_ => random.Next())
-        .ToList();
-
-    return pendingTasks;
+    return null;
 }
 
 
-static async Task<List<TaskResponse>> GetOrRequestTasksByTypeAsync(
+static async Task<TaskResponse> TryAskNewTaskAsync(
     ChallengeClient challengeClient,
     string roundId,
     string taskType,
-    int requiredAmount,
     int retryDelayMs)
 {
-    Console.WriteLine();
-    Console.WriteLine($"Проверка существующих нерешенных заданий типа '{taskType}'...");
-
-    var pendingTasks = new List<TaskResponse>();
-
     try
     {
-        pendingTasks = await WithServerRetryAsync(
-            () => challengeClient.GetTasksAsync(
-                roundId,
-                taskType,
-                TaskStatus.Pending,
-                0,
-                requiredAmount
-            ),
-            $"получение pending-задач типа '{taskType}'",
-            retryDelayMs
-        );
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Ошибка при получении pending-задач типа '{taskType}' после retry: {ex.Message}");
-    }
-
-    Console.WriteLine($"Найдено pending-задач типа '{taskType}': {pendingTasks.Count}");
-
-    var tasksToRequest = requiredAmount - pendingTasks.Count;
-    if (tasksToRequest <= 0) return pendingTasks;
-
-    Console.WriteLine(
-        $"Pending-задач не хватает. Запрашиваем еще {tasksToRequest} новых задач типа '{taskType}'...");
-
-    for (var i = 0; i < tasksToRequest; i++)
-    {
-        try
+        if (string.IsNullOrWhiteSpace(taskType))
         {
-            var currentTaskNumber = i + 1;
-
             var task = await WithServerRetryAsync(
-                () => challengeClient.AskNewTaskAsync(roundId, taskType),
-                $"запрос новой задачи типа '{taskType}' {currentTaskNumber}/{tasksToRequest}",
+                () => challengeClient.AskNewTaskAsync(roundId),
+                "запрос новой случайной задачи",
                 retryDelayMs
             );
 
-            pendingTasks.Add(task);
+            Console.WriteLine($"Получена новая случайная задача: {task.Id}");
+            return task;
+        }
 
-            Console.WriteLine($"Получена новая задача типа '{taskType}' {currentTaskNumber}/{tasksToRequest}: {task.Id}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(
-                $"Не удалось запросить новую задачу типа '{taskType}' {i + 1}/{tasksToRequest} после retry: {ex.Message}");
-        }
+        var typedTask = await WithServerRetryAsync(
+            () => challengeClient.AskNewTaskAsync(roundId, taskType),
+            $"запрос новой задачи типа '{taskType}'",
+            retryDelayMs
+        );
+
+        Console.WriteLine($"Получена новая задача типа '{taskType}': {typedTask.Id}");
+        return typedTask;
     }
-
-    return pendingTasks;
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Не удалось запросить новую задачу после retry: {ex.Message}");
+        return null;
+    }
 }
 
 
-static async Task SolveTasksAsync(
+static async Task SolveAndSubmitTaskAsync(
     ChallengeClient challengeClient,
-    List<TaskResponse> tasksToSolve,
+    TaskResponse task,
+    int currentTaskNumber,
+    int totalTaskAmount,
     bool isManualMode,
     int retryDelayMs)
 {
     Console.WriteLine();
-    Console.WriteLine($"Начало решения {tasksToSolve.Count} заданий");
+    Console.WriteLine($"Решение задачи {currentTaskNumber}/{totalTaskAmount}");
+    Console.WriteLine($"Id: {task.Id}");
+    Console.WriteLine($"Формулировка: {task.UserHint ?? "Формулировка отсутствует"}");
+    Console.WriteLine($"Вопрос: {task.Question}");
 
-    for (var i = 0; i < tasksToSolve.Count; i++)
+    string answer;
+
+    try
     {
-        var task = tasksToSolve[i];
+        answer = Solver.Solve(task);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Ошибка при решении задачи: {ex.Message}");
+        return;
+    }
 
-        Console.WriteLine();
-        Console.WriteLine($"Задание {i + 1}/{tasksToSolve.Count}");
-        Console.WriteLine($"Id: {task.Id}");
-        Console.WriteLine($"Формулировка: {task.UserHint ?? "Формулировка отсутствует"}");
-        Console.WriteLine($"Вопрос: {task.Question}");
+    if (isManualMode)
+    {
+        Console.WriteLine($"Ответ бота: {answer}");
+        Console.Write("Отправить этот ответ? y - отправить, n - ввести свой: ");
 
-        string answer;
+        var confirm = Console.ReadLine()?.Trim();
 
-        try
+        if (!string.Equals(confirm, "y", StringComparison.OrdinalIgnoreCase))
         {
-            answer = Solver.Solve(task);
+            Console.Write("Введи свой вариант ответа: ");
+            answer = Console.ReadLine()?.Trim();
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Ошибка при решении задачи: {ex.Message}");
-            continue;
-        }
+    }
 
-        if (isManualMode)
-        {
-            Console.WriteLine($"Ответ бота: {answer}");
-            Console.Write("Отправить этот ответ? y - отправить, n - ввести свой: ");
+    if (string.IsNullOrWhiteSpace(answer))
+    {
+        Console.WriteLine("Ответ пустой. Задача пропущена.");
+        return;
+    }
 
-            var confirm = Console.ReadLine()?.Trim();
+    Console.WriteLine("Ожидание отправки решения...");
 
-            if (!string.Equals(confirm, "y", StringComparison.OrdinalIgnoreCase))
-            {
-                Console.Write("Введи свой вариант ответа: ");
-                answer = Console.ReadLine()?.Trim();
-            }
-        }
+    try
+    {
+        var updatedTask = await WithServerRetryAsync(
+            () => challengeClient.CheckTaskAnswerAsync(task.Id, answer),
+            $"отправка ответа на задачу {task.Id}",
+            retryDelayMs
+        );
 
-        if (string.IsNullOrWhiteSpace(answer))
-        {
-            Console.WriteLine("Ответ пустой. Задача пропущена.");
-            continue;
-        }
-
-        Console.WriteLine("Ожидание отправки решения...");
-
-        try
-        {
-            var updatedTask = await WithServerRetryAsync(
-                () => challengeClient.CheckTaskAnswerAsync(task.Id, answer),
-                $"отправка ответа на задачу {task.Id}",
-                retryDelayMs
-            );
-
-            Console.WriteLine($"Статус ответа: {updatedTask.Status}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Ошибка при отправке ответа после retry: {ex.Message}");
-        }
+        Console.WriteLine($"Статус ответа: {updatedTask.Status}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Ошибка при отправке ответа после retry: {ex.Message}");
     }
 }
 
