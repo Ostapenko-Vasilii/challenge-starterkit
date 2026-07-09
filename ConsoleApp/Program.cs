@@ -3,156 +3,208 @@ using Challenge.DataContracts;
 using ConsoleApp;
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.IO;
 using TaskStatus = Challenge.DataContracts.TaskStatus;
 
 
-// Данное приложение можно запускать под Windows, Linux, Mac.
-// Для запуска приложения необходимо скачать и установить .NET 8.
-// Скачать можно тут: https://dotnet.microsoft.com/download/dotnet
 
+string secretFilePath = "TeamSecret.txt";
+string teamSecret = "";
 
-const string teamSecret = ""; // Вставь сюда ключ команды
+if (File.Exists(secretFilePath))
+{
+    teamSecret = File.ReadAllText(secretFilePath).Trim();
+}
+
 if (string.IsNullOrEmpty(teamSecret))
 {
-    Console.WriteLine("Задай секрет своей команды, чтобы можно было делать запросы от ее имени");
+    if (!File.Exists(secretFilePath))
+    {
+        Console.WriteLine($"Файл '{secretFilePath}' не найден.");
+    }
+    else
+    {
+        Console.WriteLine($"Файл '{secretFilePath}' обнаружен, но пуст.");
+    }
+
+    Console.Write("Введи секретный ключ твоей команды: ");
+    teamSecret = Console.ReadLine()?.Trim();
+
+    if (string.IsNullOrEmpty(teamSecret))
+    {
+        Console.WriteLine($"Ключ команды не может быть пустым. Попробуй еще разз, либо впиши его сам в файл {secretFilePath}");
+        Console.ReadLine();
+        return;
+    }
+
+    try
+    {
+        File.WriteAllText(secretFilePath, teamSecret);
+        Console.WriteLine($"Ключ успешно сохранен в файл '{secretFilePath}'");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Не удалось сохранить ключ в файл ({ex.Message}).");
+        Console.WriteLine("Но сессия продолжит работу с введенным ключом.");
+    }
+}
+
+
+
+Console.WriteLine("Ожидание...");
+var challengeClient = new ChallengeClient(teamSecret);
+
+const string challengeId = "git-course"; // Вставь айди челенджа сюда
+var challenge = await challengeClient.GetChallengeAsync(challengeId);
+
+var utcNow = DateTime.UtcNow;
+Round currentRound = null;
+foreach (var round in challenge.Rounds)
+{
+    if (round.StartTimestamp < utcNow && utcNow < round.EndTimestamp)
+        currentRound = round;
+}
+
+if (currentRound == null)
+{
+    Console.WriteLine("Раунд еще не начался");
     Console.ReadLine();
     return;
 }
 
-var challengeClient = new ChallengeClient(teamSecret);
-
-const string challengeId = "git-course"; // Вставь айди челенджа сюда
-Console.WriteLine($"Нажми ВВОД, чтобы получить информацию о соревновании {challengeId}");
-Console.ReadLine();
-Console.WriteLine("Ожидание...");
-var challenge = await challengeClient.GetChallengeAsync(challengeId);
-Console.WriteLine(challenge.Description);
-Console.WriteLine();
-Console.WriteLine("----------------");
-Console.WriteLine();
-
-const string taskType = "cypher"; //  Вставь тип задачи
-
-var utcNow = DateTime.UtcNow;
-string currentRound = null;
-foreach (var round in challenge.Rounds)
+Console.WriteLine("Доступные типы задач в текущем раунде:");
+foreach (var task in currentRound.TaskTypes)
 {
-    if (round.StartTimestamp < utcNow && utcNow < round.EndTimestamp)
-        currentRound = round.Id;
+    Console.WriteLine($"--- {task.Id}\n");
 }
 
-var taskAmount = 10;
-Console.WriteLine($"Нажми y, чтобы получить (или дозапросить) {taskAmount} задач типа {taskType} в раунде {currentRound}");
-Console.WriteLine($"Или Enter, чтобы перейти к следующему действию");
-var input = Console.ReadLine();
+Console.Write("Введи тип задачи либо нажми Enter для дефолтного типа : ");
+string taskType = Console.ReadLine()?.Trim();
 
-if (input.Equals("y"))
+var defaultTask = "starter"; // Можно написать сюда дефолт тип задачи что бы не вписывать каждый раз
+if (string.IsNullOrEmpty(taskType))
 {
-    Console.WriteLine("Проверка существующих нерешенных заданий...");
+    Console.WriteLine($"Тип не указан. По умолчанию: {defaultTask}");
+}
 
-    List<TaskResponse> pendingTasks = new List<TaskResponse>();
-
-    try
+bool Run = true;
+while (Run)
+{
+    Console.Write("Введи количество задач: ");
+    int taskAmount;
+    while (!int.TryParse(Console.ReadLine(), out taskAmount) || taskAmount <= 0)
     {
-        pendingTasks = await challengeClient.GetTasksAsync(currentRound, taskType, TaskStatus.Pending, 0, taskAmount);
+        Console.Write("Некорректный ввод. Пожалуйста, введи положительное целое число: ");
     }
-    catch (Exception ex)
+
+    Console.WriteLine($"Нажми y, чтобы получить (или дозапросить) {taskAmount} задач типа {taskType} в раунде {currentRound.Id}");
+    Console.WriteLine($"Или Enter, чтобы перейти к следующему действию");
+    var input = Console.ReadLine();
+
+    if (input.Equals("y", StringComparison.OrdinalIgnoreCase))
     {
-        Console.WriteLine($"Ошибка при получении существующих задач: {ex.Message}");
-    }
+        // Выбор режима перед началом решения
+        Console.WriteLine("\nВыбери режим решения задач:");
+        Console.WriteLine("6 - Автоматический (отправлять ответы сразу)");
+        Console.WriteLine("7 - Ручной (проверять ответы перед отправкой)");
+        Console.Write("Твой выбор (6 или 7): ");
+        bool isManualMode = Console.ReadLine()?.Trim() == "7";
 
-    Console.WriteLine($"Найдено существующих нерешенных задач: {pendingTasks.Count}");
+        Console.WriteLine("\nПроверка существующих нерешенных заданий...");
 
-    int tasksToRequest = taskAmount - pendingTasks.Count;
-
-    // Дозапрос
-    if (tasksToRequest > 0)
-    {
-        Console.WriteLine($"Запрашиваем еще {tasksToRequest} новых заданий...");
-        for (int i = 0; i < tasksToRequest; i++)
-        {
-            try
-            {
-                await challengeClient.AskNewTaskAsync(currentRound, taskType);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Не удалось запросить новую задачу {i + 1}: {ex.Message}");
-            }
-        }
+        List<TaskResponse> pendingTasks = new List<TaskResponse>();
 
         try
         {
-            pendingTasks = await challengeClient.GetTasksAsync(currentRound, taskType, TaskStatus.Pending, 0, taskAmount);
+            pendingTasks = await challengeClient.GetTasksAsync(currentRound.Id, taskType, TaskStatus.Pending, 0, taskAmount);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ошибка при обновлении списка задач: {ex.Message}");
+            Console.WriteLine($"Ошибка при получении существующих задач: {ex.Message}");
         }
-    }
 
-    // Решение задач
-    if (pendingTasks.Count > 0)
-    {
-        var tasksToSolve = pendingTasks.Count > taskAmount ? pendingTasks.GetRange(0, taskAmount) : pendingTasks;
+        Console.WriteLine($"Найдено существующих нерешенных задач: {pendingTasks.Count}");
 
-        Console.WriteLine($"Начало решения {tasksToSolve.Count} заданий");
+        int tasksToRequest = taskAmount - pendingTasks.Count;
 
-        // Чтоб не падало когда нету формулировки
-        var hint = tasksToSolve[0].UserHint ?? "Формулировка отсутствует";
-        Console.WriteLine($"  Формулировка: {hint}");
-
-        for (int i = 0; i < tasksToSolve.Count; i++)
+        // Дозапрос
+        if (tasksToRequest > 0)
         {
-            var task = tasksToSolve[i];
-            Console.WriteLine($"  Задание {i + 1}, Вопрос: {task.Question}");
-            Console.WriteLine("Ожидание решения...");
+            Console.WriteLine($"Запрашиваем еще {tasksToRequest} новых заданий...");
+            for (int i = 0; i < tasksToRequest; i++)
+            {
+                try
+                {
+                    await challengeClient.AskNewTaskAsync(currentRound.Id, taskType);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Не удалось запросить новую задачу {i + 1}: {ex.Message}");
+                }
+            }
 
-            var ans = Solver.Solve(task);
-            var updTask = await challengeClient.CheckTaskAnswerAsync(task.Id, ans);
+            try
+            {
+                pendingTasks = await challengeClient.GetTasksAsync(currentRound.Id, taskType, TaskStatus.Pending, 0, taskAmount);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Ошибка при обновлении списка задач: {ex.Message}");
+            }
+        }
 
-            Console.WriteLine($"Статус ответа: {updTask.Status}");
+        // Решение задач
+        if (pendingTasks.Count > 0)
+        {
+            var tasksToSolve = pendingTasks.Count > taskAmount ? pendingTasks.GetRange(0, taskAmount) : pendingTasks;
+
+            Console.WriteLine($"Начало решения {tasksToSolve.Count} заданий\n");
+
+            var hint = tasksToSolve[0].UserHint ?? "Формулировка отсутствует";
+            Console.WriteLine($"  Формулировка: {hint}");
+
+            for (int i = 0; i < tasksToSolve.Count; i++)
+            {
+                var task = tasksToSolve[i];
+                Console.WriteLine($"\n  Задание {i + 1}, Вопрос: {task.Question}");
+
+                var ans = Solver.Solve(task);
+
+                if (isManualMode)
+                {
+                    Console.WriteLine($"  Ответ бота: {ans}");
+                    Console.Write("  Отправить этот ответ? (y/ n - ввести свой): ");
+                    var confirm = Console.ReadLine()?.Trim();
+
+                    if (!confirm.Equals("y", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.Write("\nВведи свой вариант ответа: ");
+                        ans = Console.ReadLine()?.Trim();
+                    }
+                }
+                Console.WriteLine("Ожидание отправки решения...");
+
+                var updTask = await challengeClient.CheckTaskAnswerAsync(task.Id, ans);
+                Console.WriteLine($"  Статус ответа: {updTask.Status}");
+            }
+        }
+        else
+        {
+            Console.WriteLine("Нет задач для решения или не удалось их запросить.");
         }
     }
-    else
+
+    Console.WriteLine();
+    Console.WriteLine("------------------------------------------------");
+    Console.Write("Хочешь запросить еще задач этого типа? (y/n): ");
+    var exitChoice = Console.ReadLine()?.Trim();
+
+    if (!exitChoice.Equals("y", StringComparison.OrdinalIgnoreCase))
     {
-        Console.WriteLine("Нет задач для решения и не удалось их запросить.");
+        Run = false;
     }
 }
 
-//Console.WriteLine("----------------");
-//Console.WriteLine();
-
-//Console.WriteLine($"Нажми ВВОД, чтобы получить задачу типа {taskType} в раунде {currentRound}");
-//Console.ReadLine();
-//Console.WriteLine("Ожидание...");
-//var newTask = await challengeClient.AskNewTaskAsync(currentRound, taskType);
-//Console.WriteLine($"  Новое задание, статус {newTask.Status}");
-//Console.WriteLine($"  Формулировка: {newTask.UserHint}");
-//Console.WriteLine($"                {newTask.Question}");
-//Console.WriteLine();
-//Console.WriteLine("----------------");
-//Console.WriteLine();
-
-//var answer = Solver.Solve(newTask);
-
-//Console.WriteLine($"Нажми ВВОД, чтобы ответить на полученную задачу самым правильным ответом: {answer}");
-//Console.ReadLine();
-//Console.WriteLine("Ожидание...");
-//var updatedTask = await challengeClient.CheckTaskAnswerAsync(newTask.Id, answer);
-//Console.WriteLine($"  Новое задание, статус {updatedTask.Status}");
-//Console.WriteLine($"  Формулировка:  {updatedTask.UserHint}");
-//Console.WriteLine($"                 {updatedTask.Question}");
-//Console.WriteLine($"  Ответ команды: {updatedTask.TeamAnswer}");
-//Console.WriteLine();
-//if (updatedTask.Status == TaskStatus.Success)
-//    Console.WriteLine($"Ура! Ответ угадан!");
-//else if (updatedTask.Status == TaskStatus.Failed)
-//    Console.WriteLine($"Похоже ответ не подошел и задачу больше сдать нельзя...");
-//Console.WriteLine();
-//Console.WriteLine("----------------");
-//Console.WriteLine();
-
-Console.WriteLine($"Нажми ВВОД, чтобы завершить работу программы");
+Console.WriteLine();
+Console.WriteLine("Программа завершена. Нажми ВВОД для закрытия окна...");
 Console.ReadLine();
