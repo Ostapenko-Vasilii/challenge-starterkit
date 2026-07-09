@@ -25,6 +25,8 @@ public static class Statistics
         return function switch
         {
             "min" => numbers.Count == 0 ? "" : numbers.Min().ToString(),
+            "max" => numbers.Count == 0 ? "" : numbers.Max().ToString(),
+            "sum" => numbers.Count == 0 ? "" : numbers.Sum().ToString(),
             _ => throw new NotSupportedException()
         };
     }
