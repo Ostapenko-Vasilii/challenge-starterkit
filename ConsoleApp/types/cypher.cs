@@ -30,6 +30,18 @@ namespace ConsoleApp
                     return DecryptCeasar(enqrCode, shift);
                 }
             }
+            if (type.StartsWith("prime multiplicator"))
+            {
+                string[] parts = type.Split('=');
+                if (parts.Length > 1)
+                {
+                    string multStr = parts[1].Split(' ')[0].Trim();
+                    if (int.TryParse(multStr, out int mult))
+                    {
+                        return DecryptPrimeMultiplicator(enqrCode, mult);
+                    }
+                }
+            }
 
             throw new Exception();
         }
@@ -49,6 +61,43 @@ namespace ConsoleApp
                     deqInd += Len;
                 }
                 deq.Add(allText[deqInd]);
+            }
+
+            return new string(deq.ToArray());
+        }
+
+        private static string DecryptPrimeMultiplicator(string enqr, int mult)
+        {
+            var allText = "abcdefghijklmnopqrstuvwxyz0123456789' ";
+            int abcLen = allText.Length;
+            int mod = abcLen + 1;
+            int inv = -1;
+            for (int i = 1; i < mod; i++)
+            {
+                if ((mult * i) % mod == 1)
+                {
+                    inv = i;
+                    break;
+                }
+            }
+
+            if (inv == -1)
+                throw new Exception("на всякий");
+
+            var deq = new List<char>();
+
+            foreach (var l in enqr)
+            {
+                int newIndex = allText.IndexOf(l);
+                if (newIndex == -1) continue; 
+                int charIndex = ((newIndex + 1) * inv) % mod - 1;
+
+                if (charIndex < 0)
+                {
+                    charIndex += mod;
+                }
+
+                deq.Add(allText[charIndex]);
             }
 
             return new string(deq.ToArray());
