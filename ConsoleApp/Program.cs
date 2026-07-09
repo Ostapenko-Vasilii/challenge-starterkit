@@ -10,6 +10,7 @@ using TaskStatus = Challenge.DataContracts.TaskStatus;
 
 const string challengeId = "git-course";
 const string secretFilePath = "TeamSecret.txt";
+const int serverRetryDelayMs = 1500;
 
 var teamSecret = "";
 
@@ -30,7 +31,7 @@ if (string.IsNullOrEmpty(teamSecret))
     if (string.IsNullOrEmpty(teamSecret))
     {
         Console.WriteLine(
-            $"Ключ команды не может быть пустым. Попробуй еще разз, либо впиши его сам в файл {secretFilePath}");
+            $"Ключ команды не может быть пустым. Попробуй еще раз, либо впиши его сам в файл {secretFilePath}");
         Console.ReadLine();
         return;
     }
@@ -49,7 +50,22 @@ if (string.IsNullOrEmpty(teamSecret))
 
 var challengeClient = new ChallengeClient(teamSecret);
 
-var challenge = await challengeClient.GetChallengeAsync(challengeId);
+ChallengeResponse challenge;
+
+try
+{
+    challenge = await WithServerRetryAsync(
+        () => challengeClient.GetChallengeAsync(challengeId),
+        "получение информации о челлендже",
+        serverRetryDelayMs
+    );
+}
+catch
+{
+    Console.WriteLine("Не удалось получить информацию о челлендже после повторной попытки.");
+    Console.ReadLine();
+    return;
+}
 
 var utcNow = DateTime.UtcNow;
 var currentRound =
@@ -162,7 +178,7 @@ while (run)
         Console.WriteLine("7 - Ручной, проверять ответы перед отправкой");
         Console.Write("Твой выбор (6 или 7): ");
 
-        bool isManualMode = Console.ReadLine()?.Trim() == "7";
+        var isManualMode = Console.ReadLine()?.Trim() == "7";
 
         List<TaskResponse> tasksToSolve;
 
@@ -173,7 +189,8 @@ while (run)
                 currentRound.Id,
                 availableTaskTypes,
                 taskAmount,
-                random
+                random,
+                serverRetryDelayMs
             );
         }
         else
@@ -182,7 +199,8 @@ while (run)
                 challengeClient,
                 currentRound.Id,
                 selectedTaskType,
-                taskAmount
+                taskAmount,
+                serverRetryDelayMs
             );
         }
 
@@ -190,7 +208,12 @@ while (run)
 
         if (tasksToSolve.Count > 0)
         {
-            await SolveTasksAsync(challengeClient, tasksToSolve, isManualMode);
+            await SolveTasksAsync(
+                challengeClient,
+                tasksToSolve,
+                isManualMode,
+                serverRetryDelayMs
+            );
         }
         else
         {
@@ -217,12 +240,14 @@ Console.ReadLine();
 
 return;
 
+
 static async Task<List<TaskResponse>> GetOrRequestRandomTasksAsync(
     ChallengeClient challengeClient,
     string roundId,
     List<string> availableTaskTypes,
     int requiredAmount,
-    Random random)
+    Random random,
+    int retryDelayMs)
 {
     Console.WriteLine();
     Console.WriteLine("Проверка существующих нерешенных заданий всех типов...");
@@ -233,12 +258,16 @@ static async Task<List<TaskResponse>> GetOrRequestRandomTasksAsync(
     {
         try
         {
-            var tasksOfType = await challengeClient.GetTasksAsync(
-                roundId,
-                taskType,
-                TaskStatus.Pending,
-                0,
-                requiredAmount
+            var tasksOfType = await WithServerRetryAsync(
+                () => challengeClient.GetTasksAsync(
+                    roundId,
+                    taskType,
+                    TaskStatus.Pending,
+                    0,
+                    requiredAmount
+                ),
+                $"получение pending-задач типа '{taskType}'",
+                retryDelayMs
             );
 
             Console.WriteLine($"Тип '{taskType}': найдено pending-задач: {tasksOfType.Count}");
@@ -247,7 +276,7 @@ static async Task<List<TaskResponse>> GetOrRequestRandomTasksAsync(
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ошибка при получении pending-задач типа '{taskType}': {ex.Message}");
+            Console.WriteLine($"Ошибка при получении pending-задач типа '{taskType}' после retry: {ex.Message}");
         }
     }
 
@@ -268,14 +297,21 @@ static async Task<List<TaskResponse>> GetOrRequestRandomTasksAsync(
     {
         try
         {
-            var task = await challengeClient.AskNewTaskAsync(roundId);
+            var currentTaskNumber = i + 1;
+
+            var task = await WithServerRetryAsync(
+                () => challengeClient.AskNewTaskAsync(roundId),
+                $"запрос новой случайной задачи {currentTaskNumber}/{tasksToRequest}",
+                retryDelayMs
+            );
+
             pendingTasks.Add(task);
 
-            Console.WriteLine($"Получена новая случайная задача {i + 1}/{tasksToRequest}: {task.Id}");
+            Console.WriteLine($"Получена новая случайная задача {currentTaskNumber}/{tasksToRequest}: {task.Id}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Не удалось запросить случайную задачу {i + 1}/{tasksToRequest}: {ex.Message}");
+            Console.WriteLine($"Не удалось запросить случайную задачу {i + 1}/{tasksToRequest} после retry: {ex.Message}");
         }
     }
 
@@ -288,11 +324,13 @@ static async Task<List<TaskResponse>> GetOrRequestRandomTasksAsync(
     return pendingTasks;
 }
 
+
 static async Task<List<TaskResponse>> GetOrRequestTasksByTypeAsync(
     ChallengeClient challengeClient,
     string roundId,
     string taskType,
-    int requiredAmount)
+    int requiredAmount,
+    int retryDelayMs)
 {
     Console.WriteLine();
     Console.WriteLine($"Проверка существующих нерешенных заданий типа '{taskType}'...");
@@ -301,17 +339,21 @@ static async Task<List<TaskResponse>> GetOrRequestTasksByTypeAsync(
 
     try
     {
-        pendingTasks = await challengeClient.GetTasksAsync(
-            roundId,
-            taskType,
-            TaskStatus.Pending,
-            0,
-            requiredAmount
+        pendingTasks = await WithServerRetryAsync(
+            () => challengeClient.GetTasksAsync(
+                roundId,
+                taskType,
+                TaskStatus.Pending,
+                0,
+                requiredAmount
+            ),
+            $"получение pending-задач типа '{taskType}'",
+            retryDelayMs
         );
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Ошибка при получении pending-задач типа '{taskType}': {ex.Message}");
+        Console.WriteLine($"Ошибка при получении pending-задач типа '{taskType}' после retry: {ex.Message}");
     }
 
     Console.WriteLine($"Найдено pending-задач типа '{taskType}': {pendingTasks.Count}");
@@ -326,16 +368,22 @@ static async Task<List<TaskResponse>> GetOrRequestTasksByTypeAsync(
     {
         try
         {
-            var task = await challengeClient.AskNewTaskAsync(roundId, taskType);
+            var currentTaskNumber = i + 1;
+
+            var task = await WithServerRetryAsync(
+                () => challengeClient.AskNewTaskAsync(roundId, taskType),
+                $"запрос новой задачи типа '{taskType}' {currentTaskNumber}/{tasksToRequest}",
+                retryDelayMs
+            );
 
             pendingTasks.Add(task);
 
-            Console.WriteLine($"Получена новая задача типа '{taskType}' {i + 1}/{tasksToRequest}: {task.Id}");
+            Console.WriteLine($"Получена новая задача типа '{taskType}' {currentTaskNumber}/{tasksToRequest}: {task.Id}");
         }
         catch (Exception ex)
         {
             Console.WriteLine(
-                $"Не удалось запросить новую задачу типа '{taskType}' {i + 1}/{tasksToRequest}: {ex.Message}");
+                $"Не удалось запросить новую задачу типа '{taskType}' {i + 1}/{tasksToRequest} после retry: {ex.Message}");
         }
     }
 
@@ -346,7 +394,8 @@ static async Task<List<TaskResponse>> GetOrRequestTasksByTypeAsync(
 static async Task SolveTasksAsync(
     ChallengeClient challengeClient,
     List<TaskResponse> tasksToSolve,
-    bool isManualMode)
+    bool isManualMode,
+    int retryDelayMs)
 {
     Console.WriteLine();
     Console.WriteLine($"Начало решения {tasksToSolve.Count} заданий");
@@ -397,12 +446,50 @@ static async Task SolveTasksAsync(
 
         try
         {
-            var updatedTask = await challengeClient.CheckTaskAnswerAsync(task.Id, answer);
+            var updatedTask = await WithServerRetryAsync(
+                () => challengeClient.CheckTaskAnswerAsync(task.Id, answer),
+                $"отправка ответа на задачу {task.Id}",
+                retryDelayMs
+            );
+
             Console.WriteLine($"Статус ответа: {updatedTask.Status}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ошибка при отправке ответа: {ex.Message}");
+            Console.WriteLine($"Ошибка при отправке ответа после retry: {ex.Message}");
+        }
+    }
+}
+
+
+static async Task<T> WithServerRetryAsync<T>(
+    Func<Task<T>> action,
+    string operationName,
+    int retryDelayMs)
+{
+    try
+    {
+        return await action();
+    }
+    catch (Exception firstException)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"Ошибка сервера или API при операции: {operationName}");
+        Console.WriteLine($"Причина: {firstException.Message}");
+        Console.WriteLine($"Повторная попытка через {retryDelayMs} мс...");
+
+        await Task.Delay(retryDelayMs);
+
+        try
+        {
+            return await action();
+        }
+        catch (Exception secondException)
+        {
+            Console.WriteLine($"Повторная попытка не удалась при операции: {operationName}");
+            Console.WriteLine($"Причина: {secondException.Message}");
+
+            throw;
         }
     }
 }
